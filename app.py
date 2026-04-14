@@ -5,9 +5,10 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import io
+import os
 
 # ============================================================
-#  XML / FORMATTING HELPERS
+#  FORMATTING HELPERS (No Indentations)
 # ============================================================
 
 def remove_all_borders(cell):
@@ -28,49 +29,25 @@ def set_cell_width(cell, width_cm):
     tcW.set(qn('w:type'), 'dxa')
     tcPr.append(tcW)
 
-def set_row_height(row, height_cm, exact=True):
-    tr = row._tr
-    trPr = tr.get_or_add_trPr()
-    trHeight = OxmlElement('w:trHeight')
-    trHeight.set(qn('w:val'), str(int(height_cm * 567)))
-    trHeight.set(qn('w:hRule'), 'exact' if exact else 'atLeast')
-    trPr.append(trHeight)
-
 def add_styled_para(cell, text, font='Arial', size=11, bold=False, align=WD_ALIGN_PARAGRAPH.LEFT, space_after=0):
-    """Generic paragraph adder with NO indents."""
+    """Generates a paragraph with strictly NO indentation."""
     para = cell.add_paragraph(text)
     para.alignment = align
     run = para.runs[0]
     run.font.name = font
-    # Fix for fonts not appearing in Word's font list correctly
+    # XML force-set font for compatibility
     r = run._element
     r.get_or_add_rPr().get_or_add_rFonts().set(qn('w:ascii'), font)
     r.get_or_add_rPr().get_or_add_rFonts().set(qn('w:hAnsi'), font)
     
     run.font.size = Pt(size)
     run.font.bold = bold
+    # Force zero indents
     para.paragraph_format.space_after = Pt(space_after)
     para.paragraph_format.first_line_indent = 0
     para.paragraph_format.left_indent = 0
+    para.paragraph_format.line_spacing = 1.15
     return para
-
-# ============================================================
-#  DOCUMENT SETUP
-# ============================================================
-
-def create_document(page_size='A4', margin_cm=1.5):
-    doc = Document()
-    for para in doc.paragraphs:
-        p = para._element
-        p.getparent().remove(p)
-    
-    section = doc.sections[0]
-    sizes = {'A4': (29.7, 21.0), 'Letter': (27.94, 21.59), 'A5': (21.0, 14.85)}
-    w, h = sizes.get(page_size, (29.7, 21.0))
-    section.page_width, section.page_height = Cm(w), Cm(h)
-    section.left_margin = section.right_margin = Cm(margin_cm)
-    section.top_margin = section.bottom_margin = Cm(margin_cm)
-    return doc, w, h
 
 # ============================================================
 #  CORE LAYOUT BUILDER
@@ -89,31 +66,36 @@ def build_book_layout(doc, pages_data, page_width_cm, page_height_cm, margin_cm,
             doc.add_page_break()
 
         outer = doc.add_table(rows=1, cols=2)
-        remove_all_borders(outer.cell(0,0))
-        remove_all_borders(outer.cell(0,1))
-
+        outer.autofit = False
+        
         for col_idx, page in enumerate(pair):
             cell = outer.rows[0].cells[col_idx]
+            remove_all_borders(cell)
             set_cell_width(cell, col_width)
             
+            # If page was blank/newly added
+            if 'content' not in page: continue
+
             for item in page['content']:
                 ctype = item['type']
                 text = item['text']
+                if not text.strip(): continue
                 
                 if ctype == 'Title':
-                    add_styled_para(cell, text, settings['title_font'], settings['title_size'], True, WD_ALIGN_PARAGRAPH.CENTER, 10)
+                    add_styled_para(cell, text, settings['title_font'], settings['title_size'], True, WD_ALIGN_PARAGRAPH.CENTER, 12)
                 elif ctype == 'Subtitle':
-                    add_styled_para(cell, text, settings['title_font'], settings['subtitle_size'], False, WD_ALIGN_PARAGRAPH.CENTER, 8)
+                    add_styled_para(cell, text, settings['title_font'], settings['subtitle_size'], False, WD_ALIGN_PARAGRAPH.CENTER, 10)
                 elif ctype == 'Main Text':
-                    # Split into actual paragraphs but ensure no indentation
                     for p_text in text.split('\n'):
                         if p_text.strip():
-                            add_styled_para(cell, p_text, settings['main_font'], settings['main_size'], False)
-                elif ctype == 'Special Note':
-                    symbol = item.get('symbol', '***')
-                    add_styled_para(cell, symbol, settings['main_font'], 10, False, WD_ALIGN_PARAGRAPH.CENTER)
-                    add_styled_para(cell, text, 'Friedolin', settings['main_size']+2, True, WD_ALIGN_PARAGRAPH.CENTER)
-                    add_styled_para(cell, symbol, settings['main_font'], 10, False, WD_ALIGN_PARAGRAPH.CENTER)
+                            add_styled_para(cell, p_text, settings['main_font'], settings['main_size'], False, WD_ALIGN_PARAGRAPH.LEFT, 6)
+                elif ctype == 'Note Block':
+                    # Decorative block with symbols
+                    symbol = "— ❧ —"
+                    add_styled_para(cell, symbol, settings['main_font'], 10, False, WD_ALIGN_PARAGRAPH.CENTER, 2)
+                    # Uses the uploaded font name
+                    add_styled_para(cell, text, 'Friedolin', settings['main_size'] + 3, True, WD_ALIGN_PARAGRAPH.CENTER, 2)
+                    add_styled_para(cell, symbol, settings['main_font'], 10, False, WD_ALIGN_PARAGRAPH.CENTER, 6)
 
     return doc
 
@@ -122,58 +104,86 @@ def build_book_layout(doc, pages_data, page_width_cm, page_height_cm, margin_cm,
 # ============================================================
 
 def main():
-    st.set_page_config(page_title='Optimized Book Gen', layout='wide')
-    st.title('📖 Minimalist Book Layout')
+    st.set_page_config(page_title='Book Layout Pro', layout='wide')
 
-    with st.sidebar:
-        st.header('⚙️ Settings')
-        page_size = st.selectbox('Paper Size', ['A4', 'Letter', 'A5'])
-        margin_cm = st.slider('Margin (cm)', 0.5, 3.0, 1.0)
-        
-        fonts = ['Friedolin', 'Courier New', 'Times New Roman', 'Arial', 'Consolas']
-        
-        st.subheader('Title Typography')
-        t_font = st.selectbox('Title Font', fonts, index=0)
-        t_size = st.number_input('Title Size', 10, 40, 24)
-        s_size = st.number_input('Subtitle Size', 10, 30, 16)
-        
-        st.subheader('Body Typography')
-        m_font = st.selectbox('Main Font', fonts, index=2)
-        m_size = st.number_input('Main Size', 8, 16, 11)
+    # --- SESSION RECOVERY / MIGRATION ---
+    # This prevents the KeyError by resetting if old data format is found
+    if 'pages' in st.session_state:
+        if len(st.session_state.pages) > 0 and 'content' not in st.session_state.pages[0]:
+            del st.session_state.pages
 
     if 'pages' not in st.session_state:
-        st.session_state.pages = [{'content': [{'type': 'Title', 'text': 'Title Name'}]}]
+        st.session_state.pages = [{'content': [{'type': 'Title', 'text': 'My New Book'}]}]
 
-    # --- UI Logic to add/remove content blocks ---
+    with st.sidebar:
+        st.header('Settings')
+        page_size = st.selectbox('Paper Size', ['A4', 'Letter'])
+        margin_cm = st.slider('Margin (cm)', 0.5, 2.5, 1.2)
+        
+        # Restricted font list
+        allowed_fonts = ['Courier New', 'Times New Roman', 'Arial', 'Consolas', 'Friedolin']
+        
+        st.subheader('Titles')
+        t_font = st.selectbox('Title Font', allowed_fonts, index=1)
+        t_size = st.slider('Title Pt', 14, 48, 28)
+        s_size = st.slider('Subtitle Pt', 10, 24, 16)
+        
+        st.subheader('Body')
+        m_font = st.selectbox('Main Font', allowed_fonts, index=2)
+        m_size = st.slider('Main Pt', 8, 14, 11)
+
+    st.title('📖 Book Layout Generator')
+
+    # --- CONTENT EDITOR ---
     for i, page in enumerate(st.session_state.pages):
-        with st.expander(f'Page {i+1} Contents', expanded=True):
+        with st.expander(f'Page {i+1}', expanded=True):
+            # Sort buttons
+            col_a, col_b = st.columns([6, 1])
+            if col_b.button('🗑️ Page', key=f'del_pg_{i}'):
+                st.session_state.pages.pop(i)
+                st.rerun()
+
             for j, item in enumerate(page['content']):
-                cols = st.columns([1, 4, 1])
-                item['type'] = cols[0].selectbox("Type", ["Title", "Subtitle", "Main Text", "Special Note"], key=f"type_{i}_{j}")
-                item['text'] = cols[1].text_area("Content", value=item['text'], key=f"text_{i}_{j}", height=100)
-                if cols[2].button("🗑️", key=f"del_{i}_{j}"):
+                c1, c2, c3 = st.columns([1, 4, 0.5])
+                item['type'] = c1.selectbox('Style', 
+                    ['Title', 'Subtitle', 'Main Text', 'Note Block'], 
+                    key=f't_{i}_{j}')
+                item['text'] = c2.text_area('Text', value=item['text'], key=f'v_{i}_{j}', label_visibility='collapsed')
+                if c3.button('✕', key=f'x_{i}_{j}'):
                     page['content'].pop(j)
                     st.rerun()
             
-            if st.button("➕ Add Block", key=f"add_b_{i}"):
+            if st.button('➕ Add Section', key=f'add_sec_{i}'):
                 page['content'].append({'type': 'Main Text', 'text': ''})
                 st.rerun()
 
-    if st.button("➕ Add New Page"):
-        st.session_state.pages.append({'content': []})
+    if st.button('➕ Add New Page'):
+        st.session_state.pages.append({'content': [{'type': 'Main Text', 'text': ''}]})
         st.rerun()
 
-    if st.button('📥 Generate Document', type='primary'):
+    # --- GENERATION ---
+    if st.button('📥 Build Word Document', type='primary'):
+        doc = Document()
+        # Setup section
+        section = doc.sections[0]
+        w, h = (29.7, 21.0) if page_size == 'A4' else (27.94, 21.59)
+        section.page_width, section.page_height = Cm(w), Cm(h)
+        section.left_margin = section.right_margin = section.top_margin = section.bottom_margin = Cm(margin_cm)
+        
+        # Clean doc
+        for p in doc.paragraphs:
+            p._element.getparent().remove(p._element)
+
         settings = {
             'title_font': t_font, 'title_size': t_size, 'subtitle_size': s_size,
             'main_font': m_font, 'main_size': m_size
         }
-        doc_obj, pw, ph = create_document(page_size, margin_cm)
-        doc_obj = build_book_layout(doc_obj, st.session_state.pages, pw, ph, margin_cm, settings)
+        
+        doc = build_book_layout(doc, st.session_state.pages, w, h, margin_cm, settings)
         
         buf = io.BytesIO()
-        doc_obj.save(buf)
-        st.download_button('⬇️ Download .docx', buf.getvalue(), 'book.docx')
+        doc.save(buf)
+        st.download_button('⬇️ Download Book', buf.getvalue(), 'my_book.docx', use_container_width=True)
 
 if __name__ == '__main__':
     main()
