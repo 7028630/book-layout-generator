@@ -388,12 +388,22 @@ def main():
         st.divider()
         st.subheader('🔤 Typography')
 
-        font_name = st.selectbox(
-            'Font',
-            ['Georgia', 'Times New Roman', 'Garamond',
-             'Palatino Linotype', 'Calibri', 'Arial'],
-            index=0
-        )
+       font_name = st.selectbox(
+    'Font',
+    [
+        'Courier New',
+        'Consolas',
+        'Arial',
+        'Times New Roman',
+        'Courier',
+        'EB Garamond',        # free / open source
+        'Cormorant Garamond', # free / open source
+        'UnifrakturCook',     # gothic / blackletter - free
+        'MedievalSharp',      # gothic - free
+        'Cinzel',             # classical - free
+    ],
+    index=0
+)
 
         font_size = st.slider('Main Text (pt)', 8, 16, 11)
 
